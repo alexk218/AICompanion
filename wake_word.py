@@ -14,10 +14,11 @@ from datetime import datetime
 import pytz  # for timezone handling
 from google.cloud import dialogflow
 from google.oauth2 import service_account
-from google.protobuf.json_format import MessageToDict
 import random
 
-load_dotenv()
+load_dotenv()  # Load environment variables
+
+user_sessions = {}  # Stores user names indexed by session IDs
 
 # initialize OpenAI client
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -43,18 +44,23 @@ app = Flask(__name__)
 
 service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 credentials = service_account.Credentials.from_service_account_file(service_account_path)
-session_client = dialogflow.SessionsClient(credentials=credentials)  # Explicitly set the credentials when initializing your client
+session_client = dialogflow.SessionsClient(
+    credentials=credentials)  # Explicitly set the credentials when initializing your client
 
-@app.route('/webhook', methods=['POST']) # Flask Decorator. tells Flask to execute the following function whenever a web request matches the route (/webhook) and HTTP method (POST).
+
+@app.route('/webhook', methods=[
+    'POST'])  # Flask Decorator. tells Flask to execute the following function whenever a web request matches the route (/webhook) and HTTP method (POST).
 def webhook():
     # retrieve the JSON data sent to the Flask app's /webhook endpoint.
     # force=True tells Flask to ignore the content type of the request and attempt to parse the body as JSON regardless (even if 'Content-Type' header is not set to 'application/json')
     req = request.get_json(force=True)
+    session_id = req.get('session').split('/')[-1]  # Extract session ID from the request
     # extract name of the intent identified by Dialogflow from the JSON request.
     intent_name = req.get('queryResult').get('intent').get('displayName')
 
     # Extract parameters, default city to Montreal and date_time to None if not provided
-    parameters = req.get('queryResult').get('parameters', {})  # if 'parameters' doesn't exist, default to an empty dictionary.
+    parameters = req.get('queryResult').get('parameters',
+                                            {})  # if 'parameters' doesn't exist, default to an empty dictionary.
     city = parameters.get('geo-city')
     # When city is not provided, geo-city might not be in parameters or could be an empty list
     if not city:
@@ -63,6 +69,7 @@ def webhook():
         city = city[0] if isinstance(city, list) else city  # Extract city from list if necessary
 
     date_time = parameters.get('date-time')  # This can be None if not provided
+    user_name = parameters.get('person', {}).get('name')  # Accessing the 'name' field of the 'person' object
 
     if intent_name == 'WeatherQuery':
         weather_response = get_weather(city, date_time)
@@ -80,7 +87,57 @@ def webhook():
         # respond with the robot's name
         return jsonify({})  # Dialogflow handles the responses for this intent
 
+    if intent_name == 'CaptureName' and user_name:
+        save_user_name(user_name)
+        print(user_name)
+        user_captured_response = [f"Got it! I'll remember that your name is {user_name}.",
+                                  f"Alrighty {user_name}! Understood.",
+                                  f"Sounds good, {user_name}!",
+                                  f"{user_name}, {user_name}, {user_name}, I will never forget.",
+                                  f"Oky doky {user_name}.",
+                                  f"What a coincidence, {user_name} is my favourite name. Got it."]
+        selected_response_captured = random.choice(user_captured_response)
+        print(selected_response_captured)
+        return jsonify({
+            "fulfillmentMessages": [{
+                "text": {
+                    "text": [selected_response_captured]
+                }
+            }]
+        })
+
+    if intent_name == 'GreetingIntent':
+        user_name = load_user_name() or "there"  # Use a default name if not found
+        greeting_response = [f"Hello {user_name}, how can I help you today?",
+                             f"Howdy, {user_name}!",
+                             f"Hey there {user_name}!",
+                             f"Hi {user_name}, what's up?",
+                             f"What do you want {user_name}."]
+        selected_response_greeting = random.choice(greeting_response)
+        print(selected_response_greeting)
+        return jsonify({
+            "fulfillmentMessages": [{
+                "text": {
+                    "text": [selected_response_greeting]
+                }
+            }]
+        })
+
     return jsonify({"fulfillmentText": "Sorry, I couldn't understand that."})
+
+
+# Saves user's name to a file
+def save_user_name(name):
+    with open("user_name.txt", "w") as file:
+        file.write(name)
+
+
+def load_user_name():
+    try:
+        with open("user_name.txt", "r") as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None  # Return None if the file doesn't exist
 
 
 # API STUFF
@@ -152,7 +209,8 @@ def get_weather(city='Montreal', date_time=None):
                         date_text = "Tomorrow"
                         # Fetch future weather from daily forecast
                         future_weather = data['daily'][delta_days]
-                        print(future_weather) # this shows all the weather data fetched. maybe use this to show more stuff? 'summary', 'min', 'max'?
+                        print(
+                            future_weather)  # this shows all the weather data fetched. maybe use this to show more stuff? 'summary', 'min', 'max'?
                         weather_description = future_weather['weather'][0]['description']
                         temp_day = future_weather['temp']['day']
                         rounded_temp = round(temp_day)
@@ -177,14 +235,17 @@ def get_weather(city='Montreal', date_time=None):
 
     return weather_response
 
+
 def speak(text):
     """Use pyttsx3 to speak the text."""
     engine.say(text)
     engine.runAndWait()
 
+
 # Generate confirmation message
 def generate_confirmation():
     speak("Yes?")
+
 
 # listen and convert speech to text
 def listen_and_respond(
@@ -230,7 +291,8 @@ def generate_response(text):
 
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
-        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        city = parameters.get(
+            "geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
         if not city:
             city = "Montreal"
         date_time = parameters.get("date-time", None)
@@ -262,6 +324,7 @@ def generate_response(text):
 
     return assistant_text.strip()
 
+
 def detect_intent_text(project_id, session_id, text, language_code):
     session = session_client.session_path(project_id, session_id)
     text_input = dialogflow.TextInput(text=text, language_code=language_code)
@@ -291,6 +354,7 @@ def detect_intent_text(project_id, session_id, text, language_code):
         "fulfillment_text": response.query_result.fulfillment_text,
         "parameters": parameters
     }
+
 
 def main():
     porcupine = None
