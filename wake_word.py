@@ -191,7 +191,7 @@ def listen_and_respond(
         timeout=10):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
     with microphone as source:
         print("Please say something...")
-        recognizer.adjust_for_ambient_noise(source, duration=0.5)  # adjust for ambient noise
+        recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
         # tells the recognizer to listen to the ambient noise for half a second to calibrate.
         try:
             audio = recognizer.listen(source, timeout=timeout)
@@ -230,7 +230,9 @@ def generate_response(text):
 
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
-        city = parameters.get("geo-city", "Montreal")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        if not city:
+            city = "Montreal"
         date_time = parameters.get("date-time", None)
         weather_response = get_weather(city, date_time)
         assistant_text = weather_response
@@ -266,13 +268,22 @@ def detect_intent_text(project_id, session_id, text, language_code):
     query_input = dialogflow.QueryInput(text=text_input)
     response = session_client.detect_intent(session=session, query_input=query_input)
 
-    print("Query text:", response.query_result.query_text)
     print("Detected intent:", response.query_result.intent.display_name)
     print("Fulfillment text:", response.query_result.fulfillment_text)
 
-    # Correct application of MessageToDict
-    parameters = MessageToDict(response.query_result.parameters, preserving_proto_field_name=True) if response.query_result.parameters else {}
-
+    parameters = response.query_result.parameters
+    '''
+    if parameters:
+        # Convert to dict if it's not already a dictionary-like object
+        if not isinstance(parameters, (dict,)):
+            # This approach ensures compatibility with different parameter types
+            parameters_dict = MessageToDict(parameters, preserving_proto_field_name=True)
+        else:
+            # If it's already a dict-like object, use it directly
+            parameters_dict = dict(parameters)
+    else:
+        parameters_dict = {}
+    '''
     return {
         "intent": {
             "display_name": response.query_result.intent.display_name
