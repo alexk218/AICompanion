@@ -48,19 +48,18 @@ session_client = dialogflow.SessionsClient(
     credentials=credentials)  # Explicitly set the credentials when initializing your client
 
 
-@app.route('/webhook', methods=[
-    'POST'])  # Flask Decorator. tells Flask to execute the following function whenever a web request matches the route (/webhook) and HTTP method (POST).
+# Flask Decorator. tells Flask to execute the following function whenever a web request matches the route (/webhook) & HTTP method (POST).
+# this is used for testing in the Dialogflow console
+@app.route('/webhook', methods=['POST'])
 def webhook():
     # retrieve the JSON data sent to the Flask app's /webhook endpoint.
     # force=True tells Flask to ignore the content type of the request and attempt to parse the body as JSON regardless (even if 'Content-Type' header is not set to 'application/json')
     req = request.get_json(force=True)
-    session_id = req.get('session').split('/')[-1]  # Extract session ID from the request
-    # extract name of the intent identified by Dialogflow from the JSON request.
-    intent_name = req.get('queryResult').get('intent').get('displayName')
+    intent_name = req.get('queryResult').get('intent').get(
+        'displayName')  # extract name of the intent identified by Dialogflow from the JSON request.
 
-    # Extract parameters, default city to Montreal and date_time to None if not provided
-    parameters = req.get('queryResult').get('parameters',
-                                            {})  # if 'parameters' doesn't exist, default to an empty dictionary.
+    parameters = req.get('queryResult').get('parameters',{})  # Extract parameters. If doesn't exist, default to an empty dictionary.
+    date_time = parameters.get('date-time')  # This can be None if not provided
     city = parameters.get('geo-city')
     # When city is not provided, geo-city might not be in parameters or could be an empty list
     if not city:
@@ -68,13 +67,18 @@ def webhook():
     else:
         city = city[0] if isinstance(city, list) else city  # Extract city from list if necessary
 
-    date_time = parameters.get('date-time')  # This can be None if not provided
-    user_name = parameters.get('person', {}).get('name')  # Accessing the 'name' field of the 'person' object
+    person_param = parameters.get('person', {})
+    if isinstance(person_param, list):
+        # If it's a list, concatenate the name parts.
+        user_name = ' '.join([name_part.get('name', '') for name_part in person_param])
+        print("isList", user_name)
+    else:
+        user_name = person_param.get('name')
+        print("isNotList", user_name)
 
     if intent_name == 'WeatherQuery':
         weather_response = get_weather(city, date_time)
-        # package the weather_response string in a JSON response expected by Dialogflow
-        # converts the Python dictionary to a JSON response.
+        # converts the weather_response string to a JSON response expected by Dialogflow.
         return jsonify({
             "fulfillmentMessages": [{
                 "text": {
@@ -84,8 +88,7 @@ def webhook():
         })
 
     if intent_name == 'RobotNameQuery':
-        # respond with the robot's name
-        return jsonify({})  # Dialogflow handles the responses for this intent
+        return jsonify({})  # Respond with the robot's name. Dialogflow handles the responses for this intent
 
     if intent_name == 'CaptureName' and user_name:
         save_user_name(user_name)
@@ -96,29 +99,30 @@ def webhook():
                                   f"{user_name}, {user_name}, {user_name}, I will never forget.",
                                   f"Oky doky {user_name}.",
                                   f"What a coincidence, {user_name} is my favourite name. Got it."]
-        selected_response_captured = random.choice(user_captured_response)
-        print(selected_response_captured)
+        selected_response = random.choice(user_captured_response)
+        print(selected_response)
         return jsonify({
             "fulfillmentMessages": [{
                 "text": {
-                    "text": [selected_response_captured]
+                    "text": [selected_response]
                 }
             }]
         })
 
     if intent_name == 'GreetingIntent':
         user_name = load_user_name() or "there"  # Use a default name if not found
+        print("user_name:", user_name)
         greeting_response = [f"Hello {user_name}, how can I help you today?",
                              f"Howdy, {user_name}!",
                              f"Hey there {user_name}!",
                              f"Hi {user_name}, what's up?",
                              f"What do you want {user_name}."]
-        selected_response_greeting = random.choice(greeting_response)
-        print(selected_response_greeting)
+        selected_response = random.choice(greeting_response)
+        print(selected_response)
         return jsonify({
             "fulfillmentMessages": [{
                 "text": {
-                    "text": [selected_response_greeting]
+                    "text": [selected_response]
                 }
             }]
         })
@@ -291,8 +295,7 @@ def generate_response(text):
 
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
-        city = parameters.get(
-            "geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
         if not city:
             city = "Montreal"
         date_time = parameters.get("date-time", None)
@@ -301,6 +304,32 @@ def generate_response(text):
     elif intent_display_name == "RobotNameQuery":
         # Use the fulfillment text directly from Dialogflow's response
         assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
+    elif intent_display_name == "CaptureName":
+        user_name = load_user_name()
+        print(user_name)
+        if user_name:
+            save_user_name(user_name)
+            user_captured_response = [
+                f"Got it! I'll remember that your name is {user_name}.",
+                f"Alrighty {user_name}! Understood.",
+                f"Sounds good, {user_name}!",
+                f"{user_name}, {user_name}, {user_name}, I will never forget.",
+                f"Oky doky {user_name}.",
+                f"What a coincidence, {user_name} is my favourite name. Got it."
+            ]
+            selected_response = random.choice(user_captured_response)
+            assistant_text = selected_response
+        else:
+            assistant_text = "I couldn't capture the name correctly."
+    elif intent_display_name == "GreetingIntent":
+        user_name = load_user_name()
+        greeting_response = [f"Hello {user_name}, how can I help you today?",
+                             f"Howdy, {user_name}!",
+                             f"Hey there {user_name}!",
+                             f"Hi {user_name}, what's up?",
+                             f"What do you want {user_name}."]
+        selected_response = random.choice(greeting_response)
+        assistant_text = selected_response
     else:
         # For other intents or if Dialogflow response is not sufficient, use OpenAI's GPT-3.5 Turbo
         response = client.chat.completions.create(
@@ -335,18 +364,7 @@ def detect_intent_text(project_id, session_id, text, language_code):
     print("Fulfillment text:", response.query_result.fulfillment_text)
 
     parameters = response.query_result.parameters
-    '''
-    if parameters:
-        # Convert to dict if it's not already a dictionary-like object
-        if not isinstance(parameters, (dict,)):
-            # This approach ensures compatibility with different parameter types
-            parameters_dict = MessageToDict(parameters, preserving_proto_field_name=True)
-        else:
-            # If it's already a dict-like object, use it directly
-            parameters_dict = dict(parameters)
-    else:
-        parameters_dict = {}
-    '''
+
     return {
         "intent": {
             "display_name": response.query_result.intent.display_name
@@ -354,7 +372,6 @@ def detect_intent_text(project_id, session_id, text, language_code):
         "fulfillment_text": response.query_result.fulfillment_text,
         "parameters": parameters
     }
-
 
 def main():
     porcupine = None
@@ -375,6 +392,27 @@ def main():
                                frames_per_buffer=porcupine.frame_length,
                                input_device_index=None)  # Use default input device
 
+        # Loop for listening and responding to user input
+        while True:
+            user_text = listen_and_respond(timeout=10)  # Function implementation needed
+            if user_text:
+                response_text = generate_response(user_text)  # Function implementation needed
+                if response_text:
+                    speak(response_text)
+                else:
+                    print("Could not generate a response. Listening for the next prompt...")
+            else:
+                print("No user input detected. Listening for wake word...")
+                break
+
+    finally:
+        if audio_stream:
+            audio_stream.close()
+        if pa:
+            pa.terminate()
+        if porcupine:
+            porcupine.delete()
+'''
         # Main loop for continuous interaction
         while True:
             print("Listening for wake word...")
@@ -388,26 +426,8 @@ def main():
                     print("Wake word detected!")
                     generate_confirmation()  # Play confirmation
                     break
+'''
 
-            # Loop for listening and responding to user input
-            while True:
-                user_text = listen_and_respond(timeout=10)  # Function implementation needed
-                if user_text:
-                    response_text = generate_response(user_text)  # Function implementation needed
-                    if response_text:
-                        speak(response_text)
-                    else:
-                        print("Could not generate a response. Listening for the next prompt...")
-                else:
-                    print("No user input detected. Listening for wake word...")
-                    break
-    finally:
-        if audio_stream:
-            audio_stream.close()
-        if pa:
-            pa.terminate()
-        if porcupine:
-            porcupine.delete()
 
 
 if __name__ == "__main__":
