@@ -324,10 +324,12 @@ def generate_response(text):
     elif intent_display_name == "GreetingIntent":
         user_name = load_user_name()
         greeting_response = [f"Hello {user_name}, how can I help you today?",
-                             f"Howdy, {user_name}!",
+                             f"Howdy {user_name}!",
                              f"Hey there {user_name}!",
                              f"Hi {user_name}, what's up?",
-                             f"What do you want {user_name}."]
+                             f"What do you want {user_name}.",
+                             f"Lovely day, innit {user_name}?",
+                             f"Oh how I've missed you, {user_name}"]
         selected_response = random.choice(greeting_response)
         assistant_text = selected_response
     else:
@@ -343,7 +345,7 @@ def generate_response(text):
             # [0] selects the first choice from the list.
             assistant_text = response.choices[0].message.content
         else:
-            assistant_text = "I'm not sure how to respond to that."
+            assistant_text = "Not sure how to respond to that."
 
     # print the response and append it to the conversation history
     print(f"Assistant: {assistant_text.strip()}")
@@ -394,9 +396,9 @@ def main():
 
         # Loop for listening and responding to user input
         while True:
-            user_text = listen_and_respond(timeout=10)  # Function implementation needed
+            user_text = listen_and_respond(timeout=10)
             if user_text:
-                response_text = generate_response(user_text)  # Function implementation needed
+                response_text = generate_response(user_text)
                 if response_text:
                     speak(response_text)
                 else:
@@ -433,3 +435,5 @@ def main():
 if __name__ == "__main__":
     # app.run(debug=True)
     main()
+   # speak(generate_response("hey there"))
+
