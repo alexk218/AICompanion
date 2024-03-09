@@ -261,11 +261,14 @@ def generate_confirmation():
         lines = file.readlines()
         # select a random line from the file
         confirmation_message = random.choice(lines).strip()
+        # Remove the number and period prefix if present (assuming format "1. Message")
+        confirmation_message = confirmation_message.split('. ', 1)[-1]
         speak(confirmation_message)
+        print("Confirmation message:", confirmation_message)
 
 # listen and convert speech to text
 def listen_and_respond(
-        timeout=100):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
+        timeout=10):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
     with microphone as source:
         print("Please say something...")
         recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
@@ -415,12 +418,12 @@ def changespeakingstyle_prompt(text):
     return assistant_text
 
 def update_confirmation_message(text):
-    creative_prompt = f"The user wants you to speak in the following manner: '{text}'. Come up with a one-word confirmation answer (or two words, MAX) that you will say to indicate to the user that you are listening for their next prompt (such as 'yes', 'affirmative', etc) in the style that they specified."
+    creative_prompt = f"The user wants you to speak in the following manner: '{text}'. Generate five distinct one-word or two-word confirmation answers (such as 'yes', 'affirmative', etc) in the specified style, indicating that you are listening for their next prompt."
     print("prompt:", creative_prompt)
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         temperature=1,
-        n=5, # request 5 completions
+        # n=5, # request 5 completions
         messages=[{"role": "system", "content": creative_prompt}]
     )
     if response.choices:
@@ -457,7 +460,7 @@ def main():
     porcupine = None
     pa = None
     audio_stream = None
-    generate_confirmation()
+    # generate_confirmation()
 
     # Attempting to dynamically select the microphone
     try:
@@ -472,18 +475,31 @@ def main():
                                frames_per_buffer=porcupine.frame_length,
                                input_device_index=None)  # Use default input device
 
-        # Loop for listening and responding to user input
+        # Main loop for continuous interaction
         while True:
-            user_text = listen_and_respond(timeout=100)
-            if user_text:
-                response_text = generate_response(user_text)
-                if response_text:
-                    speak(response_text)
+            print("Listening for wake word...")
+            # Wake word detection loop
+            while True:
+                pcm = audio_stream.read(porcupine.frame_length)
+                pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+                keyword_index = porcupine.process(pcm)
+
+                if keyword_index >= 0:
+                    print("Wake word detected!")
+                    generate_confirmation()  # Play confirmation
+                    break
+            # Loop for listening and responding to user input
+            while True:
+                user_text = listen_and_respond(timeout=10)
+                if user_text:
+                    response_text = generate_response(user_text)
+                    if response_text:
+                        speak(response_text)
+                    else:
+                        print("Could not generate a response. Listening for the next prompt...")
                 else:
-                    print("Could not generate a response. Listening for the next prompt...")
-            else:
-                print("No user input detected. Listening for wake word...")
-                break
+                    print("No user input detected. Listening for wake word...")
+                    break
 
     finally:
         if audio_stream:
@@ -514,4 +530,5 @@ if __name__ == "__main__":
     # app.run(debug=True)
     main()
     # speak(generate_response("talk to me like you are a gen Z teenager from now on"))
-    # speak(generate_response("from now on you must speak like you are an excited dog"))
+    # speak(generate_response("from now on, you must speak like an angry dictator"))
+    # speak(generate_response("from now on you must speak like you are a depressed teenager"))
