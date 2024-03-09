@@ -1,4 +1,5 @@
 import os
+import proto
 import pvporcupine
 import pyaudio
 import struct
@@ -10,7 +11,7 @@ import pyttsx3
 import requests
 from flask import Flask, request, jsonify
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz  # for timezone handling
 from google.cloud import dialogflow
 from google.oauth2 import service_account
@@ -142,9 +143,11 @@ def load_user_name():
     except FileNotFoundError:
         return None  # Return None if the file doesn't exist
 
+
 def save_speaking_style(speaking_style):
     with open("speaking_style.txt", "w") as file:
         file.write(speaking_style)
+
 
 def get_speaking_style():
     try:
@@ -152,6 +155,7 @@ def get_speaking_style():
             return file.read().strip()
     except FileNotFoundError:
         return None  # Return None if the file doesn't exist
+
 
 # API STUFF
 def get_weather(city='Montreal', date_time=None):
@@ -187,6 +191,7 @@ def get_weather(city='Montreal', date_time=None):
 
         if response.status_code == 200:
             print("date_time: ", date_time)
+
             if not date_time:
                 # Handle current weather (if an exact time isn't specified)
                 current_weather = data['current']
@@ -197,6 +202,8 @@ def get_weather(city='Montreal', date_time=None):
 
             else:
                 try:
+                    # processed_date_time = process_date_time(date_time)
+
                     # parses a string representing a date in the format YYYY-MM-DD by slicing the first 10 chars from the date_time string
                     # ex: date_time:  2024-03-06T12:00:00-05:00  => date_requested:  2024-03-06
                     date_requested = datetime.strptime(date_time[:10], "%Y-%m-%d").date()
@@ -210,14 +217,7 @@ def get_weather(city='Montreal', date_time=None):
 
                     if delta_days < 0:
                         # If user asks for past dates.
-                        # Define a list of possible responses for past dates
-                        past_date_responses = [
-                            "Weather forecasts for past dates are not available, sorry.",
-                            "I can't look back in time, unfortunately.",
-                            "Sorry, I don't have information for past weather."
-                        ]
-                        # Select a random response
-                        weather_response = random.choice(past_date_responses)
+                        weather_response = "Sorry, I don't have information for past weather."
                     elif delta_days == 1:
                         date_text = "Tomorrow"
                         # Fetch future weather from daily forecast
@@ -249,6 +249,45 @@ def get_weather(city='Montreal', date_time=None):
     return weather_response
 
 
+def process_date_time(date_time):
+    if isinstance(date_time, str):
+        # Directly parse the ISO 8601 string
+        return datetime.fromisoformat(date_time[:-6])  # Removes timezone for simplicity
+    elif isinstance(date_time, proto.marshal.collections.maps.MapComposite):
+        # Handle the structured format for relative dates
+        amount = date_time.get('amount')
+        unit = date_time.get('unit')
+        # Assuming 'unit' is 'day' for simplicity; adjust logic as needed for other units
+        if unit == 'day':
+            return datetime.now() + timedelta(days=amount)
+        # Add more conditions as necessary for other units like 'week', 'month', etc.
+    # Add additional error handling or fallback as necessary
+    return None
+
+
+def format_current_weather(data, city):
+    current_weather = data['current']
+    weather_description = current_weather['weather'][0]['description']
+    temperature = current_weather['temp']
+    rounded_temp = round(temperature)
+    return f"Currently in {city}, it's {weather_description} with a temperature of {rounded_temp}°C."
+
+
+def format_future_weather(data, city, date_time):
+    # Use datetime.strptime to handle date_time if it's a valid string
+    try:
+        date_requested = datetime.strptime(date_time, "%Y-%m-%d").date()
+        today = datetime.now().date()
+        delta_days = (date_requested - today).days
+        if 0 <= delta_days <= 7:
+            # Your existing logic to handle future dates
+            return f"Forecast for {city} in {delta_days} days..."
+        else:
+            return "I can only provide weather forecasts for the next 7 days."
+    except ValueError:
+        return "Please specify the date in YYYY-MM-DD format."
+
+
 def speak(text):
     """Use pyttsx3 to speak the text."""
     engine.say(text)
@@ -265,6 +304,7 @@ def generate_confirmation():
         confirmation_message = confirmation_message.split('. ', 1)[-1]
         speak(confirmation_message)
         print("Confirmation message:", confirmation_message)
+
 
 # listen and convert speech to text
 def listen_and_respond(
@@ -306,27 +346,31 @@ def generate_response(text):
     intent_display_name = dialogflow_result["intent"]["display_name"]
     parameters = dialogflow_result["parameters"]
 
-    # Used for all prompts
-    style = get_speaking_style()
-
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
-        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        style = get_speaking_style()
+        city = parameters.get(
+            "geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
         if not city:
             city = "Montreal"
         date_time = parameters.get("date-time", None)
         weather_response = get_weather(city, date_time)
-        assistant_text = weather_response
+        # construct a creative prompt for GPT-3.5 turbo
+        assistant_text = weatherquery_prompt(city, date_time, weather_response, style)
+        # assistant_text = weather_response
     elif intent_display_name == "RobotNameQuery":
+        style = get_speaking_style()
         assistant_text = robotnamequery_prompt(style)
         # assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
+        style = get_speaking_style()
         user_name = load_user_name()
         if user_name:
             assistant_text = capturename_prompt(user_name, text, style)
         else:
             assistant_text = "I couldn't capture the name correctly."
     elif intent_display_name == "GreetingIntent":
+        style = get_speaking_style()
         user_name = load_user_name()
         assistant_text = greetingintent_prompt(user_name, text, style)
     elif intent_display_name == "ChangeSpeakingStyle":
@@ -335,7 +379,8 @@ def generate_response(text):
         update_confirmation_message(text)
     else:
         # If not one of the specified intents, use OpenAI's GPT-3.5 Turbo.
-        prompt = f"The user wants you to speak in the following manner: {style}. They just said {text}. Give them an appropriate response. KEEP IT BRIEF, MAXIMUM 2 SENTENCES!"
+        style = get_speaking_style()
+        prompt = f"The user wants you to speak in the following manner: {style}. They just said {text}. Give them an appropriate response, answering in the style they specified. KEEP IT BRIEF, MAXIMUM 2 SENTENCES!"
         print(prompt)
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -361,8 +406,25 @@ def generate_response(text):
     return assistant_text.strip()
 
 
+def weatherquery_prompt(city, date_time, weather_response, style):
+    creative_prompt = f"The user wants you to speak in the following manner: '{style}'. They asked about the weather in {city}{f' on {date_time}' if date_time else ''}. Here's what you found: {weather_response}. Now, generate a creative answer in that style. KEEP IT BRIEF, MAXIMUM 2 SENTENCES."
+    print("prompt:", creative_prompt)
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=0.7,  # Adjust based on desired creativity
+        messages=[{"role": "system", "content": creative_prompt}]
+    )
+    if response.choices:
+        assistant_text = response.choices[0].message.content
+    else:
+        assistant_text = "I'm sorry, I couldn't generate a response right now."
+    return assistant_text
+
+
 def robotnamequery_prompt(style):
     creative_prompt = f"The user wants you to speak in the following manner: '{style}'. They just asked for your name. Your name is Medmate. Tell them your name. MAX 1 SENTENCE, KEEP IT BRIEF!"
+    print("prompt:", creative_prompt)
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         temperature=1,
@@ -373,6 +435,7 @@ def robotnamequery_prompt(style):
     else:
         assistant_text = f"My name is Medmate!"
     return assistant_text
+
 
 def capturename_prompt(user_name, text, style):
     save_user_name(user_name)
@@ -389,6 +452,8 @@ def capturename_prompt(user_name, text, style):
     else:
         assistant_text = f"Nice to meet you, {user_name}! I'm looking forward to our conversations."
     return assistant_text
+
+
 def greetingintent_prompt(user_name, text, style):
     creative_prompt = f"The user wants you to speak in the following manner: /'{style}'. The user just said /'{text}' to you. Their name is {user_name}. Give them a brief greeting (MAX 1 SENTENCE)."
     print("prompt:", creative_prompt)
@@ -403,6 +468,7 @@ def greetingintent_prompt(user_name, text, style):
         assistant_text = f"Hey there, {user_name}!"
     return assistant_text
 
+
 def changespeakingstyle_prompt(text):
     creative_prompt = f"The user just said '{text}' to you. This is how they want you to speak. Give them a response that they'll enjoy and find humorous. KEEP IT BRIEF! MAX 2 SENTENCES."
     print("prompt:", creative_prompt)
@@ -416,6 +482,7 @@ def changespeakingstyle_prompt(text):
     else:
         assistant_text = f"Sorry, I encountered an error."
     return assistant_text
+
 
 def update_confirmation_message(text):
     creative_prompt = f"The user wants you to speak in the following manner: '{text}'. Generate five distinct one-word or two-word confirmation answers (such as 'yes', 'affirmative', etc) in the specified style, indicating that you are listening for their next prompt."
@@ -432,9 +499,11 @@ def update_confirmation_message(text):
                 file.write(choice.message.content.strip() + "\n")
                 print(choice.message.content.strip())
 
+
 def save_user_name(name):
     with open("user_name.txt", "w") as file:
         file.write(name)
+
 
 def detect_intent_text(project_id, session_id, text, language_code):
     session = session_client.session_path(project_id, session_id)
@@ -485,7 +554,7 @@ def main():
                 keyword_index = porcupine.process(pcm)
 
                 if keyword_index >= 0:
-                    print("Wake word detected!")
+                    # print("Wake word detected!")
                     generate_confirmation()  # Play confirmation
                     break
             # Loop for listening and responding to user input
