@@ -303,20 +303,16 @@ def generate_response(text):
         assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
         user_name = load_user_name()
-        print(user_name)
         if user_name:
             save_user_name(user_name)
-
             # Create a creative prompt using GPT-3.5, incorporating the user's name
             creative_prompt = f"The user just gave you their name, {user_name}. This will be the name that you will call them from now on. Generate a short and funny (MAX 1 SENTENCE) response to this. Use a hint of charming sarcasm."
-
             # Use the GPT-3.5 API call here with the crafted prompt
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 temperature=1,  # Adjust this value to increase or decrease randomness
                 messages=[{"role": "system", "content": creative_prompt}]
             )
-
             if response.choices:
                 assistant_text = response.choices[0].message.content
             else:
@@ -325,19 +321,21 @@ def generate_response(text):
             assistant_text = "I couldn't capture the name correctly."
     elif intent_display_name == "GreetingIntent":
         user_name = load_user_name()
-        greeting_response = [f"Hello {user_name}, how can I help you today?",
-                             f"Howdy {user_name}!",
-                             f"Hey there {user_name}!",
-                             f"Hi {user_name}, what's up?",
-                             f"What do you want {user_name}.",
-                             f"Lovely day, innit {user_name}?",
-                             f"Oh how I've missed you, {user_name}"]
-        selected_response = random.choice(greeting_response)
-        assistant_text = selected_response
+        creative_prompt = f"The user just said hi to you. Their name is {user_name}. Give them a brief (MAX 1 SENTENCE) greeting. Use a hint of charming sarcasm."
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            temperature=1,  # Adjust this value to increase or decrease randomness
+            messages=[{"role": "system", "content": creative_prompt}]
+        )
+        if response.choices:
+            assistant_text = response.choices[0].message.content
+        else:
+            assistant_text = f"Hey there, {user_name}!"
     else:
         # For other intents or if Dialogflow response is not sufficient, use OpenAI's GPT-3.5 Turbo
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
+            temperature=1,
             messages=history[-10:]
         )
         if response.choices:
