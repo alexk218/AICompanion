@@ -18,8 +18,6 @@ import random
 
 load_dotenv()  # Load environment variables
 
-user_sessions = {}  # Stores user names indexed by session IDs
-
 # initialize OpenAI client
 openai.api_key = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI(api_key=openai.api_key)
@@ -252,8 +250,7 @@ def generate_confirmation():
 
 
 # listen and convert speech to text
-def listen_and_respond(
-        timeout=10):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
+def listen_and_respond(timeout=100):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
     with microphone as source:
         print("Please say something...")
         recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
@@ -309,16 +306,21 @@ def generate_response(text):
         print(user_name)
         if user_name:
             save_user_name(user_name)
-            user_captured_response = [
-                f"Got it! I'll remember that your name is {user_name}.",
-                f"Alrighty {user_name}! Understood.",
-                f"Sounds good, {user_name}!",
-                f"{user_name}, {user_name}, {user_name}, I will never forget.",
-                f"Oky doky {user_name}.",
-                f"What a coincidence, {user_name} is my favourite name. Got it."
-            ]
-            selected_response = random.choice(user_captured_response)
-            assistant_text = selected_response
+
+            # Create a creative prompt using GPT-3.5, incorporating the user's name
+            creative_prompt = f"The user just gave you their name, {user_name}. This will be the name that you will call them from now on. Generate a short and funny (MAX 1 SENTENCE) response to this. Use a hint of charming sarcasm."
+
+            # Use the GPT-3.5 API call here with the crafted prompt
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                temperature=1,  # Adjust this value to increase or decrease randomness
+                messages=[{"role": "system", "content": creative_prompt}]
+            )
+
+            if response.choices:
+                assistant_text = response.choices[0].message.content
+            else:
+                assistant_text = f"Nice to meet you, {user_name}! I'm looking forward to our conversations."
         else:
             assistant_text = "I couldn't capture the name correctly."
     elif intent_display_name == "GreetingIntent":
@@ -396,7 +398,7 @@ def main():
 
         # Loop for listening and responding to user input
         while True:
-            user_text = listen_and_respond(timeout=10)
+            user_text = listen_and_respond(timeout=100)
             if user_text:
                 response_text = generate_response(user_text)
                 if response_text:
