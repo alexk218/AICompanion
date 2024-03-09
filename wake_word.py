@@ -257,8 +257,11 @@ def speak(text):
 
 # Generate confirmation message
 def generate_confirmation():
-    speak("Yes?")
-
+    with open("confirmation_text.txt", "r") as file:
+        lines = file.readlines()
+        # select a random line from the file
+        confirmation_message = random.choice(lines).strip()
+        speak(confirmation_message)
 
 # listen and convert speech to text
 def listen_and_respond(
@@ -313,7 +316,6 @@ def generate_response(text):
         assistant_text = weather_response
     elif intent_display_name == "RobotNameQuery":
         assistant_text = robotnamequery_prompt(style)
-        # Use the fulfillment text directly from Dialogflow's response
         # assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
         user_name = load_user_name()
@@ -326,16 +328,17 @@ def generate_response(text):
         assistant_text = greetingintent_prompt(user_name, text, style)
     elif intent_display_name == "ChangeSpeakingStyle":
         save_speaking_style(text)
-        assistant_text = changespeakingstyle_prompt(text, style)
+        assistant_text = changespeakingstyle_prompt(text)
+        update_confirmation_message(text)
     else:
-        # For other intents or if Dialogflow response is not sufficient, use OpenAI's GPT-3.5 Turbo
-        speaking_style = f"{style}. KEEP IT BRIEF, MAXIMUM 2 SENTENCES!"
+        # If not one of the specified intents, use OpenAI's GPT-3.5 Turbo.
+        prompt = f"The user wants you to speak in the following manner: {style}. They just said {text}. Give them an appropriate response. KEEP IT BRIEF, MAXIMUM 2 SENTENCES!"
+        print(prompt)
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             temperature=1,
             # messages=history[-10:]
-            messages=[{"role": "system", "content": speaking_style}]
-            # messages=[{"role": "system", "content": f"{style}. KEEP IT BRIEF, MAXIMUM 2 SENTENCES}]
+            messages=[{"role": "system", "content": prompt}]
         )
         if response.choices:
             # extracts response text from the OpenAI completion object.
@@ -359,7 +362,7 @@ def robotnamequery_prompt(style):
     creative_prompt = f"The user wants you to speak in the following manner: '{style}'. They just asked for your name. Your name is Medmate. Tell them your name. MAX 1 SENTENCE, KEEP IT BRIEF!"
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        temperature=1,  # Adjust this value to increase or decrease randomness
+        temperature=1,
         messages=[{"role": "system", "content": creative_prompt}]
     )
     if response.choices:
@@ -370,14 +373,12 @@ def robotnamequery_prompt(style):
 
 def capturename_prompt(user_name, text, style):
     save_user_name(user_name)
-    # Create a creative prompt using GPT-3.5, incorporating the user's name
     creative_prompt = f"The user wants you to speak in the following manner: '{style}'. They just gave you their name, {user_name}, and they said '{text}'. Generate a short (MAX 1 SENTENCE) response to this."
-    # creative_prompt = f"The user just gave you their name, {user_name}, and they said '{text}'. Generate a short and funny (MAX 1 SENTENCE) response to this. Use a hint of charming sarcasm."
     print("prompt:", creative_prompt)
     # Use the GPT-3.5 API call here with the crafted prompt
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        temperature=1,  # Adjust this value to increase or decrease randomness
+        temperature=1,
         messages=[{"role": "system", "content": creative_prompt}]
     )
     if response.choices:
@@ -386,13 +387,11 @@ def capturename_prompt(user_name, text, style):
         assistant_text = f"Nice to meet you, {user_name}! I'm looking forward to our conversations."
     return assistant_text
 def greetingintent_prompt(user_name, text, style):
-    # creative_prompt = f"The user just said hi to you. Their name is {user_name}. Give them a brief (MAX 1 SENTENCE) greeting. Use a hint of charming sarcasm."
-    creative_prompt = f"The user wants you to speak in the following manner: '{style}'. The user just said '{text}' to you. Their name is {user_name}. Give them a brief greeting (MAX 1 SENTENCE)."
-   # creative_prompt = f"The user just said '{text}' to you. Their name is {user_name}. Give them a brief (MAX 1 SENTENCE) greeting. Speak as if you are Donald Trump."
+    creative_prompt = f"The user wants you to speak in the following manner: /'{style}'. The user just said /'{text}' to you. Their name is {user_name}. Give them a brief greeting (MAX 1 SENTENCE)."
     print("prompt:", creative_prompt)
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        temperature=1,  # Adjust this value to increase or decrease randomness
+        temperature=1,
         messages=[{"role": "system", "content": creative_prompt}]
     )
     if response.choices:
@@ -401,12 +400,12 @@ def greetingintent_prompt(user_name, text, style):
         assistant_text = f"Hey there, {user_name}!"
     return assistant_text
 
-def changespeakingstyle_prompt(text, style):
+def changespeakingstyle_prompt(text):
     creative_prompt = f"The user just said '{text}' to you. This is how they want you to speak. Give them a response that they'll enjoy and find humorous. KEEP IT BRIEF! MAX 2 SENTENCES."
     print("prompt:", creative_prompt)
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        temperature=1,  # Adjust this value to increase or decrease randomness
+        temperature=1,
         messages=[{"role": "system", "content": creative_prompt}]
     )
     if response.choices:
@@ -414,6 +413,25 @@ def changespeakingstyle_prompt(text, style):
     else:
         assistant_text = f"Sorry, I encountered an error."
     return assistant_text
+
+def update_confirmation_message(text):
+    creative_prompt = f"The user wants you to speak in the following manner: '{text}'. Come up with a one-word confirmation answer (or two words, MAX) that you will say to indicate to the user that you are listening for their next prompt (such as 'yes', 'affirmative', etc) in the style that they specified."
+    print("prompt:", creative_prompt)
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=1,
+        n=5, # request 5 completions
+        messages=[{"role": "system", "content": creative_prompt}]
+    )
+    if response.choices:
+        with open("confirmation_text.txt", "w") as file:
+            for choice in response.choices:
+                file.write(choice.message.content.strip() + "\n")
+                print(choice.message.content.strip())
+
+def save_user_name(name):
+    with open("user_name.txt", "w") as file:
+        file.write(name)
 
 def detect_intent_text(project_id, session_id, text, language_code):
     session = session_client.session_path(project_id, session_id)
@@ -494,5 +512,6 @@ def main():
 
 if __name__ == "__main__":
     # app.run(debug=True)
-    # main()
-    speak(generate_response("tell me a joke"))
+    main()
+    # speak(generate_response("talk to me like you are a gen Z teenager from now on"))
+    # speak(generate_response("from now on you must speak like you are an excited dog"))
