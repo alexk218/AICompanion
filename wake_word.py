@@ -56,7 +56,8 @@ def webhook():
     intent_name = req.get('queryResult').get('intent').get(
         'displayName')  # extract name of the intent identified by Dialogflow from the JSON request.
 
-    parameters = req.get('queryResult').get('parameters',{})  # Extract parameters. If doesn't exist, default to an empty dictionary.
+    parameters = req.get('queryResult').get('parameters',
+                                            {})  # Extract parameters. If doesn't exist, default to an empty dictionary.
     date_time = parameters.get('date-time')  # This can be None if not provided
     city = parameters.get('geo-city')
     # When city is not provided, geo-city might not be in parameters or could be an empty list
@@ -250,7 +251,8 @@ def generate_confirmation():
 
 
 # listen and convert speech to text
-def listen_and_respond(timeout=100):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
+def listen_and_respond(
+        timeout=100):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
     with microphone as source:
         print("Please say something...")
         recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
@@ -267,6 +269,7 @@ def listen_and_respond(timeout=100):  # wait 10 seconds for the user to say some
             print("Google Speech Recognition could not understand audio")
         except sr.RequestError as e:
             print("Could not request results from Google Speech Recognition service; {0}".format(e))
+            return None
 
 
 # generate response with OpenAI API and update conversation history
@@ -292,45 +295,23 @@ def generate_response(text):
 
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
-        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        city = parameters.get(
+            "geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
         if not city:
             city = "Montreal"
         date_time = parameters.get("date-time", None)
         weather_response = get_weather(city, date_time)
         assistant_text = weather_response
     elif intent_display_name == "RobotNameQuery":
+        assistant_text = robotnamequery_prompt()
         # Use the fulfillment text directly from Dialogflow's response
-        assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
+        # assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
         user_name = load_user_name()
-        if user_name:
-            save_user_name(user_name)
-            # Create a creative prompt using GPT-3.5, incorporating the user's name
-            creative_prompt = f"The user just gave you their name, {user_name}. This will be the name that you will call them from now on. Generate a short and funny (MAX 1 SENTENCE) response to this. Use a hint of charming sarcasm."
-            # Use the GPT-3.5 API call here with the crafted prompt
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                temperature=1,  # Adjust this value to increase or decrease randomness
-                messages=[{"role": "system", "content": creative_prompt}]
-            )
-            if response.choices:
-                assistant_text = response.choices[0].message.content
-            else:
-                assistant_text = f"Nice to meet you, {user_name}! I'm looking forward to our conversations."
-        else:
-            assistant_text = "I couldn't capture the name correctly."
+        assistant_text = capturename_prompt(user_name)
     elif intent_display_name == "GreetingIntent":
         user_name = load_user_name()
-        creative_prompt = f"The user just said hi to you. Their name is {user_name}. Give them a brief (MAX 1 SENTENCE) greeting. Use a hint of charming sarcasm."
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            temperature=1,  # Adjust this value to increase or decrease randomness
-            messages=[{"role": "system", "content": creative_prompt}]
-        )
-        if response.choices:
-            assistant_text = response.choices[0].message.content
-        else:
-            assistant_text = f"Hey there, {user_name}!"
+        assistant_text = greetingintent_prompt(user_name)
     else:
         # For other intents or if Dialogflow response is not sufficient, use OpenAI's GPT-3.5 Turbo
         response = client.chat.completions.create(
@@ -340,7 +321,7 @@ def generate_response(text):
         )
         if response.choices:
             # extracts response text from the OpenAI completion object.
-            # after making a request to OpenAI's API, you receive a response object which includes a list of choices (completions).
+            # after making a request to the API, you receive a response obj which has a list of choices (completions).
             # each choice represents a possible response based on the input provided.
             # [0] selects the first choice from the list.
             assistant_text = response.choices[0].message.content
@@ -355,6 +336,50 @@ def generate_response(text):
 
     return assistant_text.strip()
 
+def robotnamequery_prompt():
+    creative_prompt = f"The user just asked for your name. Your name is Medmate. Tell them your name, using a hint of charming sarcasm. MAX 1 SENTENCE, KEEP IT BRIEF!"
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=1,  # Adjust this value to increase or decrease randomness
+        messages=[{"role": "system", "content": creative_prompt}]
+    )
+    if response.choices:
+        assistant_text = response.choices[0].message.content
+    else:
+        assistant_text = f"My name is Medmate!"
+    return assistant_text
+
+def greetingintent_prompt(user_name):
+    creative_prompt = f"The user just said hi to you. Their name is {user_name}. Give them a brief (MAX 1 SENTENCE) greeting. Use a hint of charming sarcasm."
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=1,  # Adjust this value to increase or decrease randomness
+        messages=[{"role": "system", "content": creative_prompt}]
+    )
+    if response.choices:
+        assistant_text = response.choices[0].message.content
+    else:
+        assistant_text = f"Hey there, {user_name}!"
+    return assistant_text
+
+def capturename_prompt(user_name):
+    if user_name:
+        save_user_name(user_name)
+        # Create a creative prompt using GPT-3.5, incorporating the user's name
+        creative_prompt = f"The user just gave you their name, {user_name}. This will be the name that you will call them from now on. Generate a short and funny (MAX 1 SENTENCE) response to this. Use a hint of charming sarcasm."
+        # Use the GPT-3.5 API call here with the crafted prompt
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            temperature=1,  # Adjust this value to increase or decrease randomness
+            messages=[{"role": "system", "content": creative_prompt}]
+        )
+        if response.choices:
+            assistant_text = response.choices[0].message.content
+        else:
+            assistant_text = f"Nice to meet you, {user_name}! I'm looking forward to our conversations."
+    else:
+        assistant_text = "I couldn't capture the name correctly."
+    return assistant_text
 
 def detect_intent_text(project_id, session_id, text, language_code):
     session = session_client.session_path(project_id, session_id)
@@ -374,6 +399,7 @@ def detect_intent_text(project_id, session_id, text, language_code):
         "fulfillment_text": response.query_result.fulfillment_text,
         "parameters": parameters
     }
+
 
 def main():
     porcupine = None
@@ -414,6 +440,8 @@ def main():
             pa.terminate()
         if porcupine:
             porcupine.delete()
+
+
 '''
         # Main loop for continuous interaction
         while True:
@@ -430,10 +458,7 @@ def main():
                     break
 '''
 
-
-
 if __name__ == "__main__":
     # app.run(debug=True)
-    main()
-   # speak(generate_response("hey there"))
-
+    # main()
+    speak(generate_response("what's your name?"))
