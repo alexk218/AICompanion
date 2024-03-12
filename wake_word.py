@@ -54,6 +54,7 @@ def webhook():
     # retrieve the JSON data sent to the Flask app's /webhook endpoint.
     # force=True tells Flask to ignore the content type of the request and attempt to parse the body as JSON regardless (even if 'Content-Type' header is not set to 'application/json')
     req = request.get_json(force=True)
+    session = req.get('session')  # Extract session ID from the request
     intent_name = req.get('queryResult').get('intent').get(
         'displayName')  # extract name of the intent identified by Dialogflow from the JSON request.
 
@@ -91,7 +92,7 @@ def webhook():
         return jsonify({})  # Respond with the robot's name. Dialogflow handles the responses for this intent
 
     if intent_name == 'CaptureName' and user_name:
-        save_user_name(user_name)
+        # save_user_name(user_name)
         print(user_name)
         user_captured_response = [f"Got it! I'll remember that your name is {user_name}.",
                                   f"Alrighty {user_name}! Understood.",
@@ -100,13 +101,43 @@ def webhook():
                                   f"Oky doky {user_name}.",
                                   f"What a coincidence, {user_name} is my favourite name. Got it."]
         selected_response = random.choice(user_captured_response)
-        print(selected_response)
+        # print(selected_response)
+        output_contexts = [{
+            "name": f"{session}/contexts/awaiting_name_confirmation",
+            "lifespanCount": 1,
+            "parameters": {"person": user_name}
+        }]
+        confirm_response = f"Are you sure you want me to call you {user_name} from now on?"
         return jsonify({
             "fulfillmentMessages": [{
                 "text": {
-                    "text": [selected_response]
+                    "text": [confirm_response]
                 }
-            }]
+            }],
+            "outputContexts": output_contexts  # Make sure to include this in your response
+        })
+    if intent_name == 'ConfirmYes':
+        # Extract username from the awaiting_name_confirmation context parameters
+        for context in req.get('queryResult', {}).get('outputContexts', []):
+            if context.get('name').endswith('awaiting_name_confirmation'):
+                user_name = context.get('parameters', {}).get('person')
+                save_user_name(user_name)  # Save the user name
+                response_message = f"Got it! I'll remember that your name is {user_name}."
+                # Clear the awaiting_name_confirmation context by setting its lifespan to 0
+                output_contexts = [{
+                    "name": f"{session}/contexts/awaiting_name_confirmation",
+                    "lifespanCount": 0
+                }]
+                break
+        else:
+            response_message = "Sorry, I couldn't find the name to save."
+            output_contexts = []
+
+        return jsonify({
+            "fulfillmentMessages": [{
+                "text": {"text": [response_message]}
+            }],
+            "outputContexts": output_contexts
         })
 
     if intent_name == 'GreetingIntent':
@@ -307,8 +338,7 @@ def generate_confirmation():
 
 
 # listen and convert speech to text
-def listen_and_respond(
-        timeout=10):  # wait 10 seconds for the user to say something, otherwise start listening for wake word again
+def listen_and_respond(timeout=10):  # wait 10s for user to say something, otherwise start listening for wake word
     with microphone as source:
         print("Please say something...")
         recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
@@ -349,8 +379,7 @@ def generate_response(text):
     # Check the detected intent and act accordingly
     if intent_display_name == "WeatherQuery":
         style = get_speaking_style()
-        city = parameters.get(
-            "geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
+        city = parameters.get("geo-city")  # extract geo-city from parameters dictionary and use Montreal as default (if not specified).
         if not city:
             city = "Montreal"
         date_time = parameters.get("date-time", None)
@@ -364,19 +393,22 @@ def generate_response(text):
         # assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
         style = get_speaking_style()
-        user_name = load_user_name()
-        if user_name:
+        if confirm_and_change_user_name(project_id, session_id):
+            user_name = load_user_name()
             assistant_text = capturename_prompt(user_name, text, style)
         else:
-            assistant_text = "I couldn't capture the name correctly."
+            assistant_text = "Will not change user name."
     elif intent_display_name == "GreetingIntent":
         style = get_speaking_style()
         user_name = load_user_name()
         assistant_text = greetingintent_prompt(user_name, text, style)
     elif intent_display_name == "ChangeSpeakingStyle":
-        save_speaking_style(text)
-        assistant_text = changespeakingstyle_prompt(text)
-        update_confirmation_message(text)
+        if confirm_and_change_style(text, project_id, session_id):
+            save_speaking_style(text)
+            assistant_text = changespeakingstyle_prompt(text)  # Here 'text' is explicitly passed, ensuring scope
+            update_confirmation_message(text)
+        else:
+            assistant_text = "Will not change speaking style."
     else:
         # If not one of the specified intents, use OpenAI's GPT-3.5 Turbo.
         style = get_speaking_style()
@@ -405,6 +437,40 @@ def generate_response(text):
 
     return assistant_text.strip()
 
+def confirm_and_change_style(text, project_id, session_id):
+    speak('Are you sure you want me to change my speaking style?')
+    confirmation_response = listen_and_respond(timeout=10)
+    confirmation_intent_result = detect_intent_text(project_id, session_id, confirmation_response, "en")
+    if confirmation_intent_result["intent"]["display_name"] == "ConfirmYes":
+        print("yes confirmed")
+        return True
+    else:
+        print("no confirmed")
+        return False
+
+def confirm_and_change_user_name(project_id, session_id):
+    speak('Are you sure you want to change your name?')
+    confirmation_response = listen_and_respond(timeout=10)
+    confirmation_intent_result = detect_intent_text(project_id, session_id, confirmation_response, "en")
+    if confirmation_intent_result["intent"]["display_name"] == "ConfirmYes":
+        print("yes confirmed")
+        return True
+    else:
+        print("no confirmed")
+        return False
+
+def confirmCaptureNameIntent(style, user_name):
+    creative_prompt = f"The user wants you to speak in the following manner: '{style}'. Ask them if they're sure you want to call them {user_name} from now on. MAX 1 SENTENCE, KEEP IT BRIEF!"
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=0.7,  # Adjust based on desired creativity
+        messages=[{"role": "system", "content": creative_prompt}]
+    )
+    if response.choices:
+        assistant_text = response.choices[0].message.content
+    else:
+        assistant_text = "I'm sorry, I couldn't generate a response right now."
+    return assistant_text
 
 def weatherquery_prompt(city, date_time, weather_response, style):
     creative_prompt = f"The user wants you to speak in the following manner: '{style}'. They asked about the weather in {city}{f' on {date_time}' if date_time else ''}. Here's what you found: {weather_response}. Now, generate a creative answer in that style. KEEP IT BRIEF, MAXIMUM 2 SENTENCES."
