@@ -46,7 +46,6 @@ credentials = service_account.Credentials.from_service_account_file(service_acco
 session_client = dialogflow.SessionsClient(
     credentials=credentials)  # Explicitly set the credentials when initializing your client
 
-
 # Flask Decorator. tells Flask to execute the following function whenever a web request matches the route (/webhook) & HTTP method (POST).
 # this is used for testing in the Dialogflow console
 @app.route('/webhook', methods=['POST'])
@@ -121,7 +120,7 @@ def webhook():
         for context in req.get('queryResult', {}).get('outputContexts', []):
             if context.get('name').endswith('awaiting_name_confirmation'):
                 user_name = context.get('parameters', {}).get('person')
-                save_user_name(user_name)  # Save the user name
+                save_user_name(user_name)  # Save the username
                 response_message = f"Got it! I'll remember that your name is {user_name}."
                 # Clear the awaiting_name_confirmation context by setting its lifespan to 0
                 output_contexts = [{
@@ -339,23 +338,22 @@ def generate_confirmation():
 
 # listen and convert speech to text
 def listen_and_respond(timeout=10):  # wait 10s for user to say something, otherwise start listening for wake word
-    with microphone as source:
-        print("Please say something...")
-        recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
-        # tells the recognizer to listen to the ambient noise for half a second to calibrate.
-        try:
-            audio = recognizer.listen(source, timeout=timeout)
-            text = recognizer.recognize_google(audio)
-            print("You said: " + text)
-            return text
-        except sr.WaitTimeoutError:
-            print("No speech detected within the timeout period.")
-            return None
-        except sr.UnknownValueError:
-            print("Google Speech Recognition could not understand audio")
-        except sr.RequestError as e:
-            print("Could not request results from Google Speech Recognition service; {0}".format(e))
-            return None
+    while True:
+        with microphone as source:
+            print("Please say something...")
+            recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
+            # tells the recognizer to listen to the ambient noise for half a second to calibrate.
+            try:
+                audio = recognizer.listen(source, timeout=timeout)
+                text = recognizer.recognize_google(audio)
+                print("You said: " + text)
+                return text
+            except sr.WaitTimeoutError:
+                print("No speech detected within the timeout period.")
+            except sr.UnknownValueError:
+                print("Google Speech Recognition could not understand audio")
+            except sr.RequestError as e:
+                print("Could not request results from Google Speech Recognition service; {0}".format(e))
 
 
 # generate response with OpenAI API and update conversation history
@@ -393,7 +391,10 @@ def generate_response(text):
         # assistant_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
     elif intent_display_name == "CaptureName":
         style = get_speaking_style()
-        if confirm_and_change_user_name(project_id, session_id):
+        user_name = load_user_name()
+        fulfillment_text = dialogflow_result.get("fulfillment_text", "I'm not sure how to respond to that.")
+        print(fulfillment_text)
+        if confirm_and_change_user_name(fulfillment_text, user_name, project_id, session_id):
             user_name = load_user_name()
             assistant_text = capturename_prompt(user_name, text, style)
         else:
@@ -437,8 +438,8 @@ def generate_response(text):
 
     return assistant_text.strip()
 
-def confirm_and_change_style(text, project_id, session_id):
-    speak('Are you sure you want me to change my speaking style?')
+def confirm_and_change_user_name(fulfillment_text, user_name, project_id, session_id):
+    speak(fulfillment_text)
     confirmation_response = listen_and_respond(timeout=10)
     confirmation_intent_result = detect_intent_text(project_id, session_id, confirmation_response, "en")
     if confirmation_intent_result["intent"]["display_name"] == "ConfirmYes":
@@ -447,9 +448,8 @@ def confirm_and_change_style(text, project_id, session_id):
     else:
         print("no confirmed")
         return False
-
-def confirm_and_change_user_name(project_id, session_id):
-    speak('Are you sure you want to change your name?')
+def confirm_and_change_style(text, project_id, session_id):
+    speak('Are you sure you want me to change my speaking style?')
     confirmation_response = listen_and_respond(timeout=10)
     confirmation_intent_result = detect_intent_text(project_id, session_id, confirmation_response, "en")
     if confirmation_intent_result["intent"]["display_name"] == "ConfirmYes":
@@ -626,15 +626,17 @@ def main():
             # Loop for listening and responding to user input
             while True:
                 user_text = listen_and_respond(timeout=10)
+                # If user_text is not None, process it
                 if user_text:
                     response_text = generate_response(user_text)
                     if response_text:
                         speak(response_text)
                     else:
                         print("Could not generate a response. Listening for the next prompt...")
+                # If user_text is None, it means no input was detected within the timeout or an error occurred
                 else:
                     print("No user input detected. Listening for wake word...")
-                    break
+                    continue  # or 'continue' depending on whether you want to exit the loop or not
 
     finally:
         if audio_stream:
