@@ -4,11 +4,12 @@ import serial
 import json
 from datetime import datetime
 import tkinter as tk
-from PIL import Image, ImageTk, ImageEnhance
+from PIL import Image, ImageTk, ImageEnhance, ImageFilter
 import io
 import os
 import threading
 from dotenv import load_dotenv
+from itertools import cycle
 
 load_dotenv()
 
@@ -23,6 +24,7 @@ USER_ID = os.getenv("USER_ID") # alexkepekci@hotmail.com on Cluster0
 flag_path = "wake_flag.txt" 
 desired_saturation_level = 1  # Start with normal saturation
 current_saturation_level = 1
+
 
 # GUI setup
 os.environ['DISPLAY'] = ':0' # set DISPLAY environment variable to default display
@@ -195,17 +197,19 @@ def send_sig():
 def close(event):
     root.destroy()
 
+
 def check_listening_flag():
     if os.path.exists(flag_path):
         with open(flag_path, "r") as f:
             if f.read().strip() == "detected":
                 print("Listening, updating GUI...")
-                initiate_smooth_transition(3)  # Example: Reduce saturation
+                initiate_smooth_transition(3.5)  # Example: Reduce saturation
                 # reset_flag()
             else:
                 print("Not listening, updating GUI...")
                 initiate_smooth_transition(1)
     root.after(100, check_listening_flag)
+
 
 def initiate_smooth_transition(final_saturation):
     global desired_saturation_level
@@ -214,7 +218,7 @@ def initiate_smooth_transition(final_saturation):
 
 def update_image_saturation():
     global current_saturation_level, desired_saturation_level
-    transition_speed = 0.05  # Control how fast the saturation changes per update
+    transition_speed = 1.5  # Control how fast the saturation changes per update
 
     # Calculate the difference between the current and desired saturation levels
     saturation_difference = desired_saturation_level - current_saturation_level
@@ -225,7 +229,7 @@ def update_image_saturation():
     else:
         # If the difference is within the threshold, set the current saturation to the desired level directly
         current_saturation_level = desired_saturation_level
-
+    
     # Adjust the image saturation using the current saturation level
     original_image = Image.open(background_image_path).resize((screen_width, screen_height))
     adjusted_image = adjust_saturation(original_image, current_saturation_level)
@@ -234,7 +238,7 @@ def update_image_saturation():
     img_label.image = photo
 
     # Re-schedule this function to run again after a short delay for continuous checks
-    root.after(100, update_image_saturation)
+    root.after(3, update_image_saturation)
 
 def adjust_saturation(image, saturation_level):
     """
@@ -245,6 +249,94 @@ def adjust_saturation(image, saturation_level):
     """
     enhancer = ImageEnhance.Color(image)
     return enhancer.enhance(saturation_level)
+'''
+def update_image_saturation():
+    global current_saturation_level, desired_saturation_level, is_listening, original_image
+
+    # Ensure the original_image is loaded outside of this function or make sure it's updated only once.
+    original_image = Image.open(background_image_path).resize((screen_width, screen_height))
+
+    # Adjust the image saturation using the current saturation level
+    adjusted_image = adjust_saturation(original_image, current_saturation_level)
+
+    # Apply a glow effect if the system is in the listening state
+    if is_listening:
+        adjusted_image = apply_glow_effect(adjusted_image, border_size=5, glow_color=(61, 90, 235), glow_intensity=100)
+    
+    # Calculate the difference between the current and desired saturation levels
+    saturation_difference = desired_saturation_level - current_saturation_level
+
+    # Adjust the current saturation level towards the desired level
+    if abs(saturation_difference) > 0.05:
+        current_saturation_level += (desired_saturation_level - current_saturation_level) * 0.1
+
+    # Update the image on the GUI
+    photo = ImageTk.PhotoImage(adjusted_image, master=root)
+    img_label.config(image=photo)
+    img_label.image = photo
+
+    # Re-schedule this function for continuous checks
+    root.after(5, update_image_saturation)
+'''
+
+'''
+def apply_glow_effect(image, border_size=10, glow_color=(0, 255, 255), glow_intensity=5):
+    """
+    Applies a glowing border effect to the image.
+    
+    :param image: The original PIL image.
+    :param border_size: Thickness of the glow effect.
+    :param glow_color: Color of the glow as an RGB tuple.
+    :param glow_intensity: Intensity of the glow effect.
+    :return: Image with applied glow effect.
+    """
+    # Create a new image with a border
+    new_size = (image.width + border_size * 2, image.height + border_size * 2)
+    bordered_image = Image.new("RGB", new_size, glow_color)
+    bordered_image.paste(image, (border_size, border_size))
+    
+    # Apply a blur to the border
+    blurred_image = bordered_image.filter(ImageFilter.GaussianBlur(border_size / glow_intensity))
+    
+    return blurred_image
+'''
+'''
+def pulse_brightness_effect():
+    """
+    Gradually adjusts the brightness of the background image to create a pulse effect.
+    """
+    global current_brightness_factor
+    
+    # Define a sequence of brightness factors to create the pulsing effect
+    brightness_sequence = cycle([0.99, 1.0, 1.01, 1.0])
+
+    def update_brightness():
+        global current_brightness_factor
+        try:
+            # Get the next brightness factor from the sequence
+            current_brightness_factor = next(brightness_sequence)
+            
+            # Adjust the image brightness
+            enhancer = ImageEnhance.Brightness(original_image)
+            adjusted_image = enhancer.enhance(current_brightness_factor)
+            photo = ImageTk.PhotoImage(adjusted_image, master=root)
+            img_label.config(image=photo)
+            img_label.image = photo  # Keep a reference!
+
+            # Schedule the next update
+            root.after(30, update_brightness)
+        
+        except StopIteration:
+            return
+
+    # Start the pulsing effect
+    update_brightness()
+
+# Example usage
+original_image = Image.open(background_image_path).resize((screen_width, screen_height))
+
+pulse_brightness_effect()
+'''
 
 # Bind the Escape key to the close function
 root.bind('<Escape>', close)
@@ -258,6 +350,7 @@ root.after(5, check_listening_flag)  # Initial check, subsequent checks are sche
 # root.after(1000, send_sig)
 
 update_image_saturation()  # Add this before root.mainloop()
+
 
 # Start the Tkinter event loop; this should be the last line in your script
 root.mainloop()
