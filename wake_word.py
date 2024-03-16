@@ -27,6 +27,7 @@ client = openai.OpenAI(api_key=openai.api_key)
 # initialize OpenWeatherAPI and Porcupine key
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 PORCUPINE_KEY = os.getenv("PORCUPINE_KEY")
+KEYWORD_FILE_PATH = os.getenv("KEYWORD_FILE_PATH")
 
 # file for saving user's name
 user_name_file = 'user_name.txt'
@@ -295,6 +296,7 @@ def get_speaking_style():
    except FileNotFoundError:
        return None  # Return None if the file doesn't exist
 
+'''
 # listen and convert speech to text
 def listen_and_respond(timeout=10):  # wait 10s for user to say something, otherwise start listening for wake word
    while True:
@@ -314,7 +316,31 @@ def listen_and_respond(timeout=10):  # wait 10s for user to say something, other
                print("Google Speech Recognition could not understand audio")
            except sr.RequestError as e:
                print("Could not request results from Google Speech Recognition service; {0}".format(e))
+'''
 
+def listen_and_respond(timeout=10):
+    while True:
+        with microphone as source:
+            print("Please say something...")
+            recognizer.adjust_for_ambient_noise(source, duration=1)  # adjust for ambient noise
+            # tells the recognizer to listen to the ambient noise for half a second to calibrate.
+            try:
+                audio = recognizer.listen(source, timeout=timeout)
+                try:
+                    text = recognizer.recognize_google(audio)
+                    print("You said: " + text)
+                    return text
+                except sr.UnknownValueError:
+                    print("Google Speech Recognition could not understand audio")
+                    # Instead of returning None immediately, break to allow the loop to continue
+            except sr.WaitTimeoutError:
+                print("No speech detected within the timeout period.")
+                return None
+            except sr.RequestError as e:
+                print("Could not request results from Google Speech Recognition service; {0}".format(e))
+                # Consider whether to return None or break based on your error handling preferences
+
+        
 # generate response with OpenAI API and update conversation history
 def generate_response(text):
    global history
@@ -499,7 +525,6 @@ def greetingintent_prompt(user_name, text, style):
 
 
 
-
 def changespeakingstyle_prompt(text):
    creative_prompt = f"The user just said '{text}' to you. This is how they want you to speak. Give them a response that they'll enjoy and find humorous. KEEP IT BRIEF! MAX 2 SENTENCES."
    print("prompt:", creative_prompt)
@@ -540,13 +565,10 @@ def detect_intent_text(project_id, session_id, text, language_code):
    query_input = dialogflow.QueryInput(text=text_input)
    response = session_client.detect_intent(session=session, query_input=query_input)
 
-
    print("Detected intent:", response.query_result.intent.display_name)
    print("Fulfillment text:", response.query_result.fulfillment_text)
 
-
    parameters = response.query_result.parameters
-
 
    return {
        "intent": {
@@ -637,8 +659,9 @@ def main():
 
     try:
         porcupine = pvporcupine.create(
-            access_key=PORCUPINE_KEY, 
-            keywords=["bumblebee"]
+            access_key=PORCUPINE_KEY,
+            keyword_paths=[KEYWORD_FILE_PATH] 
+          #  keywords=["bumblebee"]
         )
         pa = pyaudio.PyAudio()
         audio_stream = pa.open(
@@ -670,6 +693,7 @@ def main():
                 user_text = listen_and_respond(timeout=10)  # Listen for user input with a timeout
                 if user_text is None:
                     reset_flag()
+                    generate_confirmation()
                     break # go back to listening for wake word
                 else:
                     reset_flag() # resets the flag. used for feedback on display.
