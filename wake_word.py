@@ -17,6 +17,9 @@ import random
 from flask import Flask, request, jsonify
 import json
 import subprocess
+import time
+import threading
+from datetime import datetime
 
 load_dotenv()
 
@@ -35,6 +38,9 @@ user_name_file = 'user_name.txt'
 # System prompt and conversation history
 character_prompt = 'Answer precise and short with a hint of charming sarcasm, maximum of 2 sentences!'
 history = [{'role': 'system', 'content': character_prompt}]
+
+
+now = datetime.now()
 
 # Speech recognizer and microphone
 recognizer = sr.Recognizer()
@@ -283,7 +289,6 @@ def load_user_name():
            return file.read().strip()
    except FileNotFoundError:
        return None  # Return None if the file doesn't exist
-
 
 def save_speaking_style(speaking_style):
    with open("speaking_style.txt", "w") as file:
@@ -644,6 +649,55 @@ def reset_flag():
         f.write("")
     print("Flag reset.")
 
+'''
+def monitor_dispensing_details():
+    last_modified = None
+    while True:
+        try:
+            current_modified = os.path.getmtime('dispensing_details.json')
+            if last_modified is None or current_modified > last_modified:
+                print("DISPENSING TIME")
+                with open('dispensing_details.json', 'r') as f:
+                    details = json.load(f)
+                    speak_dispensing_details(details)
+                last_modified = current_modified
+        except FileNotFoundError:
+            pass  # Handle the file not existing yet
+        time.sleep(1)  # Check every second
+'''
+def monitor_dispensing_details():
+    message_spoken = False  # Add a flag to track if the message has been spoken
+    while True:
+        try:
+            current_time_str = datetime.now().strftime("%H:%M")
+            with open('dispensing_details.json', 'r') as f:
+                details = json.load(f)
+                print("current time:", current_time_str)
+                print("pill time:", details['pillTime'])
+                if current_time_str == details['pillTime'] and not message_spoken:
+                    speak_dispensing_details(details)
+                    message_spoken = True
+                elif current_time_str != details['pillTime']:
+                    message_spoken = False  # Reset the flag if it's a different time
+        except FileNotFoundError:
+            pass  # Handle the file not existing yet
+        time.sleep(1)  # Check every second
+
+def speak_dispensing_details(details):
+    user_name = load_user_name()
+    style = get_speaking_style()
+    prompt = f"The user wants you to speak in the following manner: '{style}'. Their name is {user_name}. You are currently giving them the following pills: {details['pillName']}, with the quantity: {details['quantity']}. Tell them what pills you are giving them and the quantity, in the specified speaking style. KEEP IT BRIEF, MAXIMUM 2 SENTENCES."
+    print("prompt:", prompt)
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        temperature=0.7,  # Adjust based on desired creativity
+        messages=[{"role": "system", "content": prompt}]
+    )
+    if response.choices:
+        speak(response.choices[0].message.content)
+        print(response.choices[0].message.content)
+
 def main():
     porcupine = None
     pa = None
@@ -714,6 +768,7 @@ def main():
             porcupine.delete()
 
 if __name__ == "__main__":
-   main()
+    threading.Thread(target=monitor_dispensing_details, daemon=True).start()
+    main()
     #generate_confirmation()
    #speak("hello")

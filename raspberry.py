@@ -155,6 +155,7 @@ def check_and_navigate():
         pillColor = fetch_medication_details(pillName)
 
         if schedule_type == 'daily' and current_time_str == pill_time_str:
+            write_dispensing_details(quantity, pillName, pill_time_str)
             send_navigation_signal(compartment, quantity)
             root.after(1000, fetch_medication_image(pillName))
             message = f"Currently dispensing {pillName}. {pillColor}"
@@ -163,10 +164,22 @@ def check_and_navigate():
         elif schedule_type == 'custom':
             schedule_days = schedule.get('scheduleDays', [])
             if current_day_str in schedule_days and current_time_str == pill_time_str:
+                write_dispensing_details(quantity, pillName, pill_time_str)
                 send_navigation_signal(compartment, quantity)
                 root.after(1000, fetch_medication_image(pillName))
                 message = f"Currently dispensing {pillName}. {pillColor}"
                 display_message(message)
+
+# write dispensing details to a file. fed into AI companion during pill dispensing times
+def write_dispensing_details(quantity, pillName, pillTime):
+    dispensing_details = {
+        'quantity': quantity,
+        'pillName': pillName,
+        'pillTime': pillTime
+    }
+    with open('dispensing_details.json', 'w') as f:
+        json.dump(dispensing_details, f)
+
 
 def read_schedules():
    with open(schedules_file, 'r') as file:
@@ -180,12 +193,12 @@ def send_navigation_signal(compartment, quantity):
 def periodically_fetch_medication_schedules():
     fetch_medication_schedules()
     # Schedule this function to run again after 15 seconds (15000 milliseconds)
-    root.after(15000, periodically_fetch_medication_schedules)
+    root.after(5000, periodically_fetch_medication_schedules)
 
 def periodically_check_and_navigate():
     check_and_navigate()
     # Schedule this function to run again after 15 seconds (15000 milliseconds)
-    root.after(15000, periodically_check_and_navigate)
+    root.after(5000, periodically_check_and_navigate)
 
 def send_sig():
    print("connected to: " + ser.portstr)
@@ -249,6 +262,29 @@ def adjust_saturation(image, saturation_level):
     """
     enhancer = ImageEnhance.Color(image)
     return enhancer.enhance(saturation_level)
+
+
+# Bind the Escape key to the close function
+root.bind('<Escape>', close)
+
+
+# Initialize the periodic tasks
+root.after(1000, periodically_fetch_medication_schedules)
+root.after(1000, periodically_check_and_navigate)
+root.after(5, check_listening_flag)  # Initial check, subsequent checks are scheduled by the function itself
+
+# root.after(1000, send_sig)
+
+update_image_saturation()  # Add this before root.mainloop()
+
+
+# Start the Tkinter event loop; this should be the last line in your script
+root.mainloop()
+
+
+
+
+
 '''
 def update_image_saturation():
     global current_saturation_level, desired_saturation_level, is_listening, original_image
@@ -337,25 +373,6 @@ original_image = Image.open(background_image_path).resize((screen_width, screen_
 
 pulse_brightness_effect()
 '''
-
-# Bind the Escape key to the close function
-root.bind('<Escape>', close)
-
-
-# Initialize the periodic tasks
-root.after(1000, periodically_fetch_medication_schedules)
-root.after(1000, periodically_check_and_navigate)
-root.after(5, check_listening_flag)  # Initial check, subsequent checks are scheduled by the function itself
-
-# root.after(1000, send_sig)
-
-update_image_saturation()  # Add this before root.mainloop()
-
-
-# Start the Tkinter event loop; this should be the last line in your script
-root.mainloop()
-
-
 
 
 
