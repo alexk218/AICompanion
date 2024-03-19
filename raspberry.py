@@ -20,10 +20,13 @@ schedules_file = 'medication_schedules.json'
 
 USER_ID = os.getenv("USER_ID") # alexkepekci@hotmail.com on Cluster0
 
-
+# For visual feedback when listening for user prompts
 flag_path = "wake_flag.txt" 
 desired_saturation_level = 1  # Start with normal saturation
 current_saturation_level = 1
+
+# Initialize dictionary to keep track of last dispensing times for each compartment
+last_dispense_time = {}
 
 
 # GUI setup
@@ -186,9 +189,21 @@ def read_schedules():
        return json.load(file)
 
 def send_navigation_signal(compartment, quantity):
+    global last_dispense_time
+    now = datetime.now()
+    current_time_str = now.strftime("%Y-%m-%d %H:%M")
+    
+    if compartment in last_dispense_time:
+        last_time_str = last_dispense_time[compartment].strftime("%Y-%m-%d %H:%M")
+        if current_time_str = last_time_str:
+            print(f"Skipping duplicate command for compartment {compartment}")
+            return
+    
     command = f"NAVIGATE,{compartment},{quantity}\n"
     print(f"Sending command to Arduino: {command.strip()}")
     ser.write(command.encode('utf-8'))
+    
+    last_dispense_time[compartment] = now  # Update last dispense time for this compartment
 
 def periodically_fetch_medication_schedules():
     fetch_medication_schedules()
