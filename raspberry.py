@@ -195,7 +195,7 @@ def send_navigation_signal(compartment, quantity):
     
     if compartment in last_dispense_time:
         last_time_str = last_dispense_time[compartment].strftime("%Y-%m-%d %H:%M")
-        if current_time_str = last_time_str:
+        if current_time_str == last_time_str:
             print(f"Skipping duplicate command for compartment {compartment}")
             return
     
